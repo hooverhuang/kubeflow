@@ -1,0 +1,28 @@
+# 臨時文件
+*.tmp
+*.log
+*.swp
+*~
+
+# 備份文件
+*.bak
+*.backup
+*-backup.yaml
+
+# 證書和密鑰（不應該上傳）
+*.key
+*.crt
+*.pem
+tls-secret.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.iml

@@ -1,0 +1,73 @@
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy  # ⚠️ 必須使用此名稱，Operator 只會處理此名稱的 CR
+spec:
+  # OFED 驅動程式配置
+  ofedDriver:
+    image: doca-driver
+    repository: nvcr.io/nvidia/mellanox  # ✅ 已修正為公開倉庫
+    version: doca3.1.0-25.07-0.9.7.0-0   # ✅ 已修正為可用版本
+    # ⚠️ imagePullSecrets 已配置在 ofed-driver ServiceAccount 中
+    upgradePolicy:
+      autoUpgrade: false  # ⚠️ 初次部署建議設為 false，穩定後可啟用
+      maxParallelUpgrades: 1
+      drain:
+        enable: true
+        force: false  # ⚠️ 建議設為 false，避免強制排空
+        timeoutSeconds: 300
+        deleteEmptyDir: true
+    startupProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      failureThreshold: 30
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      failureThreshold: 3
+    readinessProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      failureThreshold: 3
+
+  # RDMA 設備插件配置
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox  # ✅ 已修正為公開倉庫
+    version: network-operator-v25.7.0    # ✅ 已修正為可用版本
+    # ⚠️ imagePullSecrets 已配置在 default ServiceAccount 中
+    # ✅ 已配置 ConnectX-7 設備 ID
+    # 主設備: 1021 (ConnectX-7)
+    # VF 設備: 101e (Virtual Functions)
+    # 如果需要支援其他 Mellanox 設備，可添加更多 deviceIDs
+    config: |
+      {
+        "configList": [
+          {
+            "resourceName": "rdma_shared_device_a",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "vendors": ["15b3"],
+              "deviceIDs": ["1021", "101e"]
+            }
+          }
+        ]
+      }
+
+  # 次要網路配置
+  # ⚠️ 注意：集群中已有 Multus CNI (kube-multus-ds)，因此不部署 Multus
+  # 只部署 CNI plugins 以支援次要網路功能
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: nvcr.io/nvidia/mellanox  # ✅ 已修正為公開倉庫
+      version: network-operator-v25.7.0    # ✅ 已修正為可用版本
+    # multus 已移除，使用現有的 Multus CNI
+
+  # NVIDIA IPAM 配置（可選）
+  nvIpam:
+    image: nvidia-k8s-ipam
+    repository: nvcr.io/nvidia/mellanox  # ✅ 已修正為公開倉庫
+    version: network-operator-v25.7.0    # ✅ 已修正為可用版本
+    enableWebhook: false
+

@@ -1,0 +1,70 @@
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: torch-distributed
+  labels:
+    trainer.kubeflow.org/framework: torch
+spec:
+  mlPolicy:
+    numNodes: 1
+    torch:
+      numProcPerNode: auto
+  template:
+    metadata: {}
+    spec:
+      replicatedJobs:
+        - groupName: default
+          name: node
+          replicas: 1
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              backoffLimit: 0
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: nvcr.io/nvidia/pytorch:25.10-py3
+                      # ✅ 只保留必要的環境變數（LD_LIBRARY_PATH）
+                      # ⚠️ NCCL 環境變數由 Webhook 自動注入（通過 ConfigMap）
+                      env:
+                        - name: LD_LIBRARY_PATH
+                          value: >-
+                            /opt/hpcx/nccl_rdma_sharp_plugin/lib:/usr/local/lib/python3.12/dist-packages/torch/lib:/usr/local/lib/python3.12/dist-packages/torch_tensorrt/lib:/usr/local/cuda/compat/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+                      # ✅ 資源請求由 TrainJob spec 指定，Webhook 會自動注入 RDMA 資源
+                      resources: {}
+                      # ✅ 保留 securityContext（訪問 InfiniBand 設備需要）
+                      securityContext:
+                        capabilities:
+                          add:
+                            - IPC_LOCK
+                            - SYS_ADMIN
+                            - NET_ADMIN
+                        privileged: true
+                      # ✅ 保留 volume mounts（訪問 InfiniBand 設備必需）
+                      volumeMounts:
+                        - mountPath: /dev/infiniband
+                          name: dev-infiniband
+                        - mountPath: /sys/class/infiniband
+                          name: sys-class-infiniband
+                          readOnly: true
+                        - mountPath: /dev/shm
+                          name: dshm
+                  restartPolicy: Never
+                  volumes:
+                    - hostPath:
+                        path: /dev/infiniband
+                        type: Directory
+                      name: dev-infiniband
+                    - hostPath:
+                        path: /sys/class/infiniband
+                        type: Directory
+                      name: sys-class-infiniband
+                    - emptyDir:
+                        medium: Memory
+                        sizeLimit: 8Gi
+                      name: dshm
+              ttlSecondsAfterFinished: 86400
+
