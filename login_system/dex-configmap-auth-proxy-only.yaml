@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+  namespace: auth
+data:
+  config.yaml: |
+    issuer: https://kubeflow.ubilink.ai/dex
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+    web:
+      http: 0.0.0.0:5556
+    logger:
+      level: "debug"
+      format: text
+    oauth2:
+      skipApprovalScreen: true
+
+    connectors:
+    # Auth Proxy connector - 驗證 MySQL bcrypt 密碼（測試用，暫時禁用 Authentik）
+    - type: oidc
+      id: auth-proxy
+      name: Billing Auth
+      config:
+        issuer: https://kubeflowlogin.ubilink.ai
+        clientID: kubeflow-auth-proxy
+        clientSecret: change-this-secret-key-in-production
+        redirectURI: https://kubeflow.ubilink.ai/dex/callback
+        insecureSkipEmailVerified: true
+        insecureEnableGroups: false
+        insecureSkipVerify: true
+        scopes:
+        - openid
+        - profile
+        - email
+
+    # Authentik connector（暫時註釋，用於測試）
+    # - type: oidc
+    #   id: authentik
+    #   name: Authentik
+    #   config:
+    #     issuer: https://authentik.ubilink.ai/application/o/kubeflow-dex/
+    #     clientID: hxl26gPgWU1qQQmKzFWVroYZePKcbw4auph3w05Z
+    #     clientSecret: 9gRbUNVcX95HFSFsfuxqzCMI07pSzCKVQDci4LOThVdTElwdd1WC6asaC9BcWkiUZFaLr7afU9M2MM1ADdmfboE8NoBTV60SIswCXx4IhNGZiF04jufU57nw8EBvgUyM
+    #     redirectURI: https://kubeflow.ubilink.ai/dex/callback
+    #     insecureSkipEmailVerified: true
+    #     insecureEnableGroups: true
+    #     insecureSkipVerify: true
+    #     scopes:
+    #     - openid
+    #     - profile
+    #     - email
+    #     - groups
+
+    staticClients:
+    - idEnv: OIDC_CLIENT_ID
+      redirectURIs: ["/oauth2/callback"]
+      name: "Dex Login Application"
+      secretEnv: OIDC_CLIENT_SECRET
+      public: false
+

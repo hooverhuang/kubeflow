@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-proxy
+  namespace: auth
+  labels:
+    app: auth-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-proxy
+  template:
+    metadata:
+      labels:
+        app: auth-proxy
+    spec:
+      containers:
+      # Python Auth Proxy - OIDC Provider
+      - name: auth-proxy-backend
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            pip install Flask==3.0.0 PyMySQL==1.1.0 bcrypt==4.1.1 PyJWT==2.8.0 Werkzeug==3.0.1 ldap3==2.9.1 cryptography==41.0.7
+            python /app/app.py
+        ports:
+        - containerPort: 8080
+          name: http
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        env:
+        - name: MYSQL_HOST
+          value: "10.2.240.11"
+        - name: MYSQL_PORT
+          value: "3306"
+        - name: MYSQL_DB
+          value: "auth"
+        - name: MYSQL_USER
+          value: "usagereportdb"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-auth-secret
+              key: password
+        - name: OIDC_CLIENT_ID
+          value: "kubeflow-auth-proxy"
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: auth-proxy-secret
+              key: client-secret
+        - name: OIDC_ISSUER
+          value: "https://kubeflowlogin.ubilink.ai"
+        - name: FLASK_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: auth-proxy-secret
+              key: flask-secret-key
+        - name: LDAP_SERVER
+          value: "openldap.auth.svc.cluster.local"
+        - name: LDAP_PORT
+          value: "389"
+        - name: LDAP_BASE_DN
+          value: "dc=ubilink,dc=ai"
+        - name: LDAP_ADMIN_DN
+          value: "cn=admin,dc=ubilink,dc=ai"
+        - name: LDAP_ADMIN_PASSWORD
+          value: "admin123"
+        - name: PORT
+          value: "8080"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: app-code
+        configMap:
+          name: auth-proxy-app-code
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-proxy-app-code
+  namespace: auth
+data:
+  app.py: |
+    # 這裡會包含完整的 app.py 內容
+    # 由於內容較長，我們需要從文件讀取
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-proxy
+  namespace: auth
+spec:
+  type: NodePort
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+    nodePort: 30080
+  selector:
+    app: auth-proxy
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: auth-proxy-secret
+  namespace: auth
+type: Opaque
+stringData:
+  client-secret: "change-this-secret-key-in-production"
+  flask-secret-key: "change-this-flask-secret-in-production"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-auth-secret
+  namespace: auth
+type: Opaque
+stringData:
+  password: "1@2Ma89t}yMz75kj"
+

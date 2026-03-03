@@ -1,0 +1,31 @@
+# Patch for istio-ingressgateway-oauth2-proxy AuthorizationPolicy
+# Add api.ubilink.ai to notHosts and /serving/* to notPaths
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: istio-ingressgateway-oauth2-proxy
+  namespace: istio-system
+spec:
+  action: CUSTOM
+  provider:
+    name: oauth2-proxy
+  rules:
+  - to:
+    - operation:
+        notHosts:
+        - '*.yeisimon657.example.com'
+        - '*.hoover2274.example.com'
+        - api.ubilink.ai
+        - '*.api.ubilink.ai'
+        notPaths:
+        - /dex/*
+        - /dex/**
+        - /oauth2/*
+        - /serving/*
+    when:
+    - key: request.headers[authorization]
+      notValues:
+      - '*'
+  selector:
+    matchLabels:
+      app: istio-ingressgateway

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: resource-quota-manager
+description: A Helm chart for ResourceQuota Manager - Web UI for managing Kubernetes ResourceQuotas
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - resourcequota
+  - kubernetes
+  - management
+  - web-ui
+maintainers:
+  - name: ResourceQuota Manager Team

@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+  namespace: auth
+data:
+  config.yaml: |
+    issuer: https://kubeflow.ubilink.ai/dex
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+    web:
+      http: 0.0.0.0:5556
+    logger:
+      level: "debug"
+      format: text
+    oauth2:
+      skipApprovalScreen: true
+
+    connectors:
+    # Authentik connector（原有，保留）
+    - type: oidc
+      id: authentik
+      name: Authentik
+      config:
+        issuer: https://authentik.ubilink.ai/application/o/kubeflow-dex/
+        clientID: hxl26gPgWU1qQQmKzFWVroYZePKcbw4auph3w05Z
+        clientSecret: 9gRbUNVcX95HFSFsfuxqzCMI07pSzCKVQDci4LOThVdTElwdd1WC6asaC9BcWkiUZFaLr7afU9M2MM1ADdmfboE8NoBTV60SIswCXx4IhNGZiF04jufU57nw8EBvgUyM
+        redirectURI: https://kubeflow.ubilink.ai/dex/callback
+        insecureSkipEmailVerified: true
+        insecureEnableGroups: true
+        insecureSkipVerify: true
+        scopes:
+        - openid
+        - profile
+        - email
+        - groups
+
+    # OpenLDAP connector（新增）
+    - type: ldap
+      id: openldap
+      name: OpenLDAP
+      config:
+        # OpenLDAP 服務地址
+        # 使用 Kubernetes Service 名稱（推薦，通過 Service 訪問）
+        host: openldap.auth.svc.cluster.local:389
+        # 備用：直接使用 Kubernetes 內部 IP（已測試可連接）
+        # host: 10.2.2.108:389
+        
+        # 警告：使用 389 端口（非 TLS）會以明文傳輸密碼
+        # 建議未來升級到 636 (LDAPS) 或使用 startTLS
+        insecureNoSSL: true
+        
+        # 應用服務帳號（用於搜索用戶和組）
+        bindDN: cn=admin,dc=ubilink,dc=ai
+        bindPW: admin123
+        
+        # 用戶名提示
+        usernamePrompt: Email Address
+        
+        # 用戶搜索配置
+        userSearch:
+          # 用戶搜索的基礎 DN
+          baseDN: ou=users,dc=ubilink,dc=ai
+          # 過濾器：搜索 inetOrgPerson 類型的對象
+          filter: "(objectClass=inetOrgPerson)"
+          # 用戶名屬性（用戶登錄時輸入的字段）
+          username: uid
+          # 用戶 ID 屬性（唯一標識符）
+          idAttr: uid
+          # 郵箱屬性（必需）
+          emailAttr: mail
+          # 顯示名稱屬性
+          nameAttr: cn
+          # 首選用戶名屬性
+          preferredUsernameAttr: uid
+        
+        # 組搜索配置（可選，如果 LDAP 中有組信息）
+        # groupSearch:
+        #   baseDN: ou=groups,dc=ubilink,dc=ai
+        #   filter: "(objectClass=groupOfNames)"
+        #   userMatchers:
+        #   - userAttr: DN
+        #     groupAttr: member
+        #   nameAttr: cn
+
+    staticClients:
+    - idEnv: OIDC_CLIENT_ID
+      redirectURIs: ["/oauth2/callback"]
+      name: "Dex Login Application"
+      secretEnv: OIDC_CLIENT_SECRET
+      public: false
+

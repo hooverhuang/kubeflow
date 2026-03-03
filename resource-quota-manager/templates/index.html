@@ -1,0 +1,456 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResourceQuota 管理系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .resource-card {
+            margin-bottom: 20px;
+        }
+        .quota-bar {
+            height: 25px;
+            margin-top: 5px;
+        }
+        .exceeded {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="bi bi-speedometer2"></i> ResourceQuota 管理系统
+            </span>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <label class="form-label">选择 Namespace:</label>
+                <select id="namespaceSelect" class="form-select" onchange="loadQuota()">
+                    <option value="">-- 选择 Namespace --</option>
+                </select>
+            </div>
+            <div class="col-md-6 text-end">
+                <button class="btn btn-primary" onclick="showCreateModal()">
+                    <i class="bi bi-plus-circle"></i> 创建 ResourceQuota
+                </button>
+                <button class="btn btn-secondary" onclick="loadQuota()">
+                    <i class="bi bi-arrow-clockwise"></i> 刷新
+                </button>
+            </div>
+        </div>
+
+        <div id="quotaList"></div>
+
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5><i class="bi bi-list-ul"></i> Pod 资源使用情况</h5>
+            </div>
+            <div class="card-body">
+                <div id="podList"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="quotaModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">创建 ResourceQuota</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="quotaForm">
+                        <div class="mb-3">
+                            <label class="form-label">名称:</label>
+                            <input type="text" class="form-control" id="quotaName" required>
+                        </div>
+                        <div class="mb-3">
+                            <h6>CPU 限制</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label class="form-label">Requests:</label>
+                                    <input type="text" class="form-control" id="cpuRequests" placeholder="例如: 100">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Limits:</label>
+                                    <input type="text" class="form-control" id="cpuLimits" placeholder="例如: 200">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <h6>内存限制</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label class="form-label">Requests:</label>
+                                    <input type="text" class="form-control" id="memoryRequests" placeholder="例如: 500Gi">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Limits:</label>
+                                    <input type="text" class="form-control" id="memoryLimits" placeholder="例如: 1000Gi">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <h6>GPU 限制</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label class="form-label">Requests:</label>
+                                    <input type="text" class="form-control" id="gpuRequests" placeholder="例如: 32">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Limits:</label>
+                                    <input type="text" class="form-control" id="gpuLimits" placeholder="例如: 64">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <h6>其他限制</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label class="form-label">Pods:</label>
+                                    <input type="text" class="form-control" id="podLimit" placeholder="例如: 50">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Storage:</label>
+                                    <input type="text" class="form-control" id="storageLimit" placeholder="例如: 500Gi">
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveQuota()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = '/api';
+        let currentNamespace = '';
+        let currentQuotaName = '';
+
+        window.onload = function() {
+            loadNamespaces();
+        };
+
+        async function loadNamespaces() {
+            try {
+                const response = await fetch(`${API_BASE}/namespaces`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const select = document.getElementById('namespaceSelect');
+                    select.innerHTML = '<option value="">-- 选择 Namespace --</option>';
+                    data.data.forEach(ns => {
+                        const option = document.createElement('option');
+                        option.value = ns;
+                        option.textContent = ns;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                alert('加载 Namespace 失败: ' + error.message);
+            }
+        }
+
+        async function loadQuota() {
+            const namespace = document.getElementById('namespaceSelect').value;
+            if (!namespace) {
+                document.getElementById('quotaList').innerHTML = '<div class="alert alert-info">请先选择 Namespace</div>';
+                return;
+            }
+
+            currentNamespace = namespace;
+
+            try {
+                const [quotaResponse, podResponse] = await Promise.all([
+                    fetch(`${API_BASE}/quota/${namespace}`),
+                    fetch(`${API_BASE}/pods/${namespace}`)
+                ]);
+
+                const quotaData = await quotaResponse.json();
+                const podData = await podResponse.json();
+
+                if (quotaData.success) {
+                    displayQuota(quotaData.data);
+                }
+
+                if (podData.success) {
+                    displayPods(podData.data);
+                }
+            } catch (error) {
+                alert('加载数据失败: ' + error.message);
+            }
+        }
+
+        function displayQuota(quotas) {
+            const container = document.getElementById('quotaList');
+            
+            if (quotas.length === 0) {
+                container.innerHTML = '<div class="alert alert-warning">该 Namespace 没有 ResourceQuota</div>';
+                return;
+            }
+
+            let html = '';
+            quotas.forEach(quota => {
+                html += `
+                    <div class="card resource-card">
+                        <div class="card-header d-flex justify-content-between">
+                            <h5><i class="bi bi-shield-check"></i> ${quota.name}</h5>
+                            <div>
+                                <button class="btn btn-sm btn-warning" onclick="editQuota('${quota.name}')">
+                                    <i class="bi bi-pencil"></i> 编辑
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteQuota('${quota.name}')">
+                                    <i class="bi bi-trash"></i> 删除
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            ${displayResourceLimits(quota.hard, quota.used)}
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function displayResourceLimits(hard, used) {
+            let html = '<div class="row">';
+            
+            const resources = [
+                { key: 'requests.cpu', label: 'CPU Requests', unit: '' },
+                { key: 'limits.cpu', label: 'CPU Limits', unit: '' },
+                { key: 'requests.memory', label: 'Memory Requests', unit: '' },
+                { key: 'limits.memory', label: 'Memory Limits', unit: '' },
+                { key: 'requests.nvidia.com/gpu', label: 'GPU Requests', unit: '' },
+                { key: 'limits.nvidia.com/gpu', label: 'GPU Limits', unit: '' },
+                { key: 'pods', label: 'Pods', unit: '' },
+            ];
+
+            resources.forEach(resource => {
+                const hardValue = hard[resource.key] || '0';
+                const usedValue = used[resource.key] || '0';
+                
+                if (hardValue !== '0') {
+                    const percentage = calculatePercentage(usedValue, hardValue);
+                    const isExceeded = percentage > 100;
+                    
+                    html += `
+                        <div class="col-md-6 mb-3">
+                            <div class="d-flex justify-content-between">
+                                <span><strong>${resource.label}:</strong></span>
+                                <span class="${isExceeded ? 'exceeded' : ''}">
+                                    ${usedValue} / ${hardValue} ${resource.unit}
+                                    ${isExceeded ? ' (超出!)' : ` (${percentage.toFixed(1)}%)`}
+                                </span>
+                            </div>
+                            <div class="progress quota-bar">
+                                <div class="progress-bar ${isExceeded ? 'bg-danger' : percentage > 80 ? 'bg-warning' : 'bg-success'}" 
+                                     style="width: ${Math.min(percentage, 100)}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            html += '</div>';
+            return html;
+        }
+
+        function calculatePercentage(used, total) {
+            const usedNum = parseFloat(used) || 0;
+            const totalNum = parseFloat(total) || 1;
+            return (usedNum / totalNum) * 100;
+        }
+
+        function displayPods(pods) {
+            const container = document.getElementById('podList');
+            
+            if (pods.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">该 Namespace 没有 Pod</div>';
+                return;
+            }
+
+            let html = '<table class="table table-striped"><thead><tr><th>Pod 名称</th><th>状态</th><th>GPU Requests</th><th>CPU Requests</th><th>Memory Requests</th></tr></thead><tbody>';
+            
+            pods.forEach(pod => {
+                const gpu = pod.resources.requests['nvidia.com/gpu'] || '0';
+                const cpu = pod.resources.requests['cpu'] || '0';
+                const memory = pod.resources.requests['memory'] || '0';
+                
+                html += `
+                    <tr>
+                        <td>${pod.name}</td>
+                        <td><span class="badge bg-${getStatusColor(pod.status)}">${pod.status}</span></td>
+                        <td>${gpu}</td>
+                        <td>${cpu}</td>
+                        <td>${memory}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        function getStatusColor(status) {
+            const colors = {
+                'Running': 'success',
+                'Pending': 'warning',
+                'Failed': 'danger',
+                'Succeeded': 'info'
+            };
+            return colors[status] || 'secondary';
+        }
+
+        function showCreateModal() {
+            if (!currentNamespace) {
+                alert('请先选择 Namespace');
+                return;
+            }
+
+            document.getElementById('modalTitle').textContent = '创建 ResourceQuota';
+            document.getElementById('quotaForm').reset();
+            document.getElementById('quotaName').disabled = false;
+            currentQuotaName = '';
+            
+            const modal = new bootstrap.Modal(document.getElementById('quotaModal'));
+            modal.show();
+        }
+
+        async function editQuota(quotaName) {
+            currentQuotaName = quotaName;
+            
+            try {
+                const response = await fetch(`${API_BASE}/quota/${currentNamespace}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const quota = data.data.find(q => q.name === quotaName);
+                    if (quota) {
+                        document.getElementById('modalTitle').textContent = `编辑 ResourceQuota: ${quotaName}`;
+                        document.getElementById('quotaName').value = quota.name;
+                        document.getElementById('quotaName').disabled = true;
+                        
+                        document.getElementById('cpuRequests').value = quota.hard['requests.cpu'] || '';
+                        document.getElementById('cpuLimits').value = quota.hard['limits.cpu'] || '';
+                        document.getElementById('memoryRequests').value = quota.hard['requests.memory'] || '';
+                        document.getElementById('memoryLimits').value = quota.hard['limits.memory'] || '';
+                        document.getElementById('gpuRequests').value = quota.hard['requests.nvidia.com/gpu'] || '';
+                        document.getElementById('gpuLimits').value = quota.hard['limits.nvidia.com/gpu'] || '';
+                        document.getElementById('podLimit').value = quota.hard['pods'] || '';
+                        document.getElementById('storageLimit').value = quota.hard['requests.storage'] || '';
+                        
+                        const modal = new bootstrap.Modal(document.getElementById('quotaModal'));
+                        modal.show();
+                    }
+                }
+            } catch (error) {
+                alert('加载 ResourceQuota 失败: ' + error.message);
+            }
+        }
+
+        async function saveQuota() {
+            const name = document.getElementById('quotaName').value;
+            if (!name) {
+                alert('请输入名称');
+                return;
+            }
+
+            const hard = {};
+            
+            if (document.getElementById('cpuRequests').value) {
+                hard['requests.cpu'] = document.getElementById('cpuRequests').value;
+            }
+            if (document.getElementById('cpuLimits').value) {
+                hard['limits.cpu'] = document.getElementById('cpuLimits').value;
+            }
+            if (document.getElementById('memoryRequests').value) {
+                hard['requests.memory'] = document.getElementById('memoryRequests').value;
+            }
+            if (document.getElementById('memoryLimits').value) {
+                hard['limits.memory'] = document.getElementById('memoryLimits').value;
+            }
+            if (document.getElementById('gpuRequests').value) {
+                hard['requests.nvidia.com/gpu'] = document.getElementById('gpuRequests').value;
+            }
+            if (document.getElementById('gpuLimits').value) {
+                hard['limits.nvidia.com/gpu'] = document.getElementById('gpuLimits').value;
+            }
+            if (document.getElementById('podLimit').value) {
+                hard['pods'] = document.getElementById('podLimit').value;
+            }
+            if (document.getElementById('storageLimit').value) {
+                hard['requests.storage'] = document.getElementById('storageLimit').value;
+            }
+
+            try {
+                const url = currentQuotaName 
+                    ? `${API_BASE}/quota/${currentNamespace}/${currentQuotaName}`
+                    : `${API_BASE}/quota/${currentNamespace}`;
+                
+                const method = currentQuotaName ? 'PUT' : 'POST';
+                
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        hard: hard
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message);
+                    bootstrap.Modal.getInstance(document.getElementById('quotaModal')).hide();
+                    loadQuota();
+                } else {
+                    alert('操作失败: ' + data.error);
+                }
+            } catch (error) {
+                alert('保存失败: ' + error.message);
+            }
+        }
+
+        async function deleteQuota(quotaName) {
+            if (!confirm(`确定要删除 ResourceQuota "${quotaName}" 吗？`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/quota/${currentNamespace}/${quotaName}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message);
+                    loadQuota();
+                } else {
+                    alert('删除失败: ' + data.error);
+                }
+            } catch (error) {
+                alert('删除失败: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

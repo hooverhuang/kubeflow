@@ -1,0 +1,58 @@
+# vLLM runtime 的 --model 需用 {{.StorageUri}}（模型路徑），不能用 {{.Name}}
+# 套用: kubectl apply -f kserve-vllm-fix-apply.yaml
+#
+# 若 fsdfdsfds 仍 Pending/Invalid，套用此檔後會依 storageUri 拉模型並啟動
+apiVersion: serving.kserve.io/v1alpha1
+kind: ClusterServingRuntime
+metadata:
+  name: kserve-vllm
+spec:
+  annotations:
+    prometheus.kserve.io/path: /metrics
+    prometheus.kserve.io/port: "8080"
+  containers:
+    - name: kserve-container
+      image: vllm/vllm-openai:v0.6.3.post1
+      command:
+        - python3
+        - -m
+        - vllm.entrypoints.openai.api_server
+      args:
+        - --model
+        - "{{.StorageUri}}"
+        - --port
+        - "8080"
+        - --download-dir
+        - /mnt/models
+        - --served-model-name
+        - "{{.Name}}"
+      env:
+        - name: HF_HUB_CACHE
+          value: /mnt/models
+        - name: STORAGE_URI
+          value: "{{.StorageUri}}"
+      ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 120
+        periodSeconds: 30
+        timeoutSeconds: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+  protocolVersions:
+    - v1
+    - v2
+  supportedModelFormats:
+    - name: vllm
+      version: "1"
+      autoSelect: true

@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-ldap-sync
+  namespace: auth
+  labels:
+    app: mysql-ldap-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-ldap-sync
+  template:
+    metadata:
+      labels:
+        app: mysql-ldap-sync
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: sync
+        image: python:3.11-slim
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          pip install pymysql ldap3 -q
+          python /app/sync.py
+        env:
+        - name: MYSQL_HOST
+          value: "10.2.240.11"
+        - name: MYSQL_PORT
+          value: "3306"
+        - name: MYSQL_DB
+          value: "auth"
+        - name: MYSQL_USER
+          value: "usagereportdb"
+        - name: MYSQL_PASSWORD
+          value: "1@2Ma89t}yMz75kj"
+        - name: LDAP_SERVER
+          value: "openldap.auth.svc.cluster.local"
+        - name: LDAP_PORT
+          value: "389"
+        - name: LDAP_BASE_DN
+          value: "dc=ubilink,dc=ai"
+        - name: LDAP_ADMIN_DN
+          value: "cn=admin,dc=ubilink,dc=ai"
+        - name: LDAP_ADMIN_PASSWORD
+          value: "admin123"
+        - name: SYNC_INTERVAL
+          value: "300"
+        volumeMounts:
+        - name: sync-script
+          mountPath: /app/sync.py
+          subPath: sync.py
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: sync-script
+        configMap:
+          name: mysql-ldap-sync-script
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          pip install pymysql ldap3 -q
+          python /app/sync.py
+        env:
+        - name: MYSQL_HOST
+          value: "10.2.240.11"
+        - name: MYSQL_PORT
+          value: "3306"
+        - name: MYSQL_DB
+          value: "auth"
+        - name: MYSQL_USER
+          value: "usagereportdb"
+        - name: MYSQL_PASSWORD
+          value: "1@2Ma89t}yMz75kj"
+        - name: LDAP_SERVER
+          value: "openldap.auth.svc.cluster.local"
+        - name: LDAP_PORT
+          value: "389"
+        - name: LDAP_BASE_DN
+          value: "dc=ubilink,dc=ai"
+        - name: LDAP_ADMIN_DN
+          value: "cn=admin,dc=ubilink,dc=ai"
+        - name: LDAP_ADMIN_PASSWORD
+          value: "admin123"
+        - name: SYNC_INTERVAL
+          value: "300"
+        volumeMounts:
+        - name: sync-script
+          mountPath: /app/sync.py
+          subPath: sync.py
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: sync-script
+        configMap:
+          name: mysql-ldap-sync-script
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-ldap-sync-script
+  namespace: auth
+data:
+  sync.py: |
+    # 同步腳本內容將從 mysql-ldap-sync.py 複製
+

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: isvc-authz-controller
+  namespace: kubeflow
+  labels:
+    app: isvc-authz-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: isvc-authz-controller
+  template:
+    metadata:
+      labels:
+        app: isvc-authz-controller
+    spec:
+      serviceAccountName: isvc-authz-controller
+      containers:
+      - name: controller
+        image: bitnami/kubectl:latest
+        imagePullPolicy: Always
+        command: ["/bin/bash"]
+        args: ["/app/controller.sh"]
+        volumeMounts:
+        - name: controller-script
+          mountPath: /app
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      volumes:
+      - name: controller-script
+        configMap:
+          name: isvc-authz-controller-script
+          defaultMode: 0755
+

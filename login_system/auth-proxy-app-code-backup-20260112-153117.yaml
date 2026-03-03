@@ -1,0 +1,162 @@
+apiVersion: v1
+data:
+  app.py: "#!/usr/bin/env python3\n\"\"\"\nAuth Proxy - OIDC Provider for MySQL bcrypt
+    Authentication\n驗證 MySQL bcrypt 密碼，然後提供 OIDC token\n\"\"\"\n\nfrom flask import
+    Flask, request, redirect, session, jsonify\nimport pymysql\nimport bcrypt\nimport
+    os\nimport logging\nfrom datetime import datetime, timedelta\nimport jwt\nimport
+    secrets\nfrom ldap3 import Server, Connection, ALL\nfrom cryptography.hazmat.primitives
+    import serialization\nfrom cryptography.hazmat.primitives.asymmetric import rsa\nfrom
+    cryptography.hazmat.backends import default_backend\nimport base64\n\n# 配置日誌\nlogging.basicConfig(\n
+    \   level=logging.INFO,\n    format='%(asctime)s - %(levelname)s - %(message)s'\n)\nlogger
+    = logging.getLogger(__name__)\n\napp = Flask(__name__)\napp.secret_key = os.getenv(\"FLASK_SECRET_KEY\",
+    secrets.token_hex(32))\n\n# 服務器端授權碼存儲（替代 session，因為 token 請求來自服務器）\nauth_codes_storage
+    = {}\n\n# 生成 RSA 密鑰對用於 JWT 簽名（RS256）\ndef generate_rsa_keypair():\n    \"\"\"生成
+    RSA 密鑰對\"\"\"\n    private_key = rsa.generate_private_key(\n        public_exponent=65537,\n
+    \       key_size=2048,\n        backend=default_backend()\n    )\n    public_key
+    = private_key.public_key()\n    return private_key, public_key\n\n# 初始化 RSA 密鑰對\n_private_key,
+    _public_key = generate_rsa_keypair()\n\n# MySQL 配置\nMYSQL_HOST = os.getenv(\"MYSQL_HOST\",
+    \"10.2.240.11\")\nMYSQL_PORT = int(os.getenv(\"MYSQL_PORT\", \"3306\"))\nMYSQL_DB
+    = os.getenv(\"MYSQL_DB\", \"auth\")\nMYSQL_USER = os.getenv(\"MYSQL_USER\", \"usagereportdb\")\nMYSQL_PASSWORD
+    = os.getenv(\"MYSQL_PASSWORD\", \"1@2Ma89t}yMz75kj\")\n\n# OIDC 配置\nOIDC_CLIENT_ID
+    = os.getenv(\"OIDC_CLIENT_ID\", \"kubeflow-auth-proxy\")\nOIDC_CLIENT_SECRET =
+    os.getenv(\"OIDC_CLIENT_SECRET\", secrets.token_urlsafe(32))\nOIDC_ISSUER = os.getenv(\"OIDC_ISSUER\",
+    \"https://auth-proxy.ubilink.ai\")\n\n# LDAP 配置（用於查詢用戶信息和組）\nLDAP_SERVER = os.getenv(\"LDAP_SERVER\",
+    \"openldap.auth.svc.cluster.local\")\nLDAP_PORT = int(os.getenv(\"LDAP_PORT\",
+    \"389\"))\nLDAP_BASE_DN = os.getenv(\"LDAP_BASE_DN\", \"dc=ubilink,dc=ai\")\nLDAP_ADMIN_DN
+    = os.getenv(\"LDAP_ADMIN_DN\", f\"cn=admin,{LDAP_BASE_DN}\")\nLDAP_ADMIN_PASSWORD
+    = os.getenv(\"LDAP_ADMIN_PASSWORD\", \"admin123\")\nLDAP_USERS_OU = f\"ou=users,{LDAP_BASE_DN}\"\n\ndef
+    get_user_from_mysql(email):\n    \"\"\"從 MySQL 獲取用戶信息\"\"\"\n    try:\n        conn
+    = pymysql.connect(\n            host=MYSQL_HOST,\n            port=MYSQL_PORT,\n
+    \           user=MYSQL_USER,\n            password=MYSQL_PASSWORD,\n            database=MYSQL_DB,\n
+    \           charset='utf8mb4'\n        )\n        cursor = conn.cursor()\n        cursor.execute(\n
+    \           \"SELECT email, password, name, role FROM users WHERE email = %s AND
+    status = 'active'\",\n            (email,)\n        )\n        row = cursor.fetchone()\n
+    \       cursor.close()\n        conn.close()\n        \n        if row:\n            return
+    {\n                \"email\": row[0],\n                \"password_hash\": row[1],\n
+    \               \"name\": row[2] or row[0],\n                \"role\": row[3]
+    or \"user\"\n            }\n        return None\n    except Exception as e:\n
+    \       logger.error(f\"MySQL 查詢錯誤: {e}\")\n        return None\n\ndef verify_bcrypt_password(password,
+    password_hash):\n    \"\"\"驗證 bcrypt 密碼\"\"\"\n    try:\n        if not password_hash
+    or not password_hash.startswith(\"$2\"):\n            return False\n        return
+    bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))\n    except
+    Exception as e:\n        logger.error(f\"密碼驗證錯誤: {e}\")\n        return False\n\ndef
+    get_user_info_from_ldap(email):\n    \"\"\"從 LDAP 獲取用戶信息和組\"\"\"\n    try:\n        server
+    = Server(LDAP_SERVER, port=LDAP_PORT, get_info=ALL)\n        with Connection(server,
+    LDAP_ADMIN_DN, LDAP_ADMIN_PASSWORD, auto_bind=True) as conn:\n            user_dn
+    = f\"uid={email},{LDAP_USERS_OU}\"\n            if conn.search(user_dn, '(objectClass=*)',
+    attributes=['cn', 'mail', 'description']):\n                entry = conn.entries[0]\n
+    \               return {\n                    \"name\": str(entry.cn[0]) if 'cn'
+    in entry else email,\n                    \"email\": str(entry.mail[0]) if 'mail'
+    in entry else email,\n                    \"role\": str(entry.description[0])
+    if 'description' in entry else None\n                }\n        return None\n
+    \   except Exception as e:\n        logger.warning(f\"LDAP 查詢錯誤（將使用 MySQL 數據）:
+    {e}\")\n        return None\n\n@app.route('/.well-known/openid-configuration',
+    methods=['GET'])\ndef openid_configuration():\n    \"\"\"OIDC Discovery 端點\"\"\"\n
+    \   base_url = request.url_root.rstrip('/')\n    return jsonify({\n        \"issuer\":
+    OIDC_ISSUER,\n        \"authorization_endpoint\": f\"{base_url}/authorize\",\n
+    \       \"token_endpoint\": f\"{base_url}/token\",\n        \"userinfo_endpoint\":
+    f\"{base_url}/userinfo\",\n        \"jwks_uri\": f\"{base_url}/.well-known/jwks.json\",\n
+    \       \"response_types_supported\": [\"code\"],\n        \"subject_types_supported\":
+    [\"public\"],\n        \"id_token_signing_alg_values_supported\": [\"RS256\"],\n
+    \       \"scopes_supported\": [\"openid\", \"profile\", \"email\"]\n    })\n\n@app.route('/authorize',
+    methods=['GET'])\ndef authorize():\n    \"\"\"OIDC 授權端點\"\"\"\n    client_id =
+    request.args.get('client_id')\n    redirect_uri = request.args.get('redirect_uri')\n
+    \   scope = request.args.get('scope', 'openid profile email')\n    state = request.args.get('state')\n
+    \   \n    if not client_id or not redirect_uri:\n        return jsonify({\"error\":
+    \"invalid_request\"}), 400\n    \n    # 檢查是否已登錄\n    if 'user_email' not in session:\n
+    \       # 顯示登錄頁面\n        return f'''\n        <!DOCTYPE html>\n        <html>\n
+    \       <head><title>Kubeflow Auth Proxy - Login</title></head>\n        <body>\n
+    \           <h2>Kubeflow 登錄</h2>\n            <form method=\"POST\" action=\"/login\">\n
+    \               <input type=\"hidden\" name=\"client_id\" value=\"{client_id}\">\n
+    \               <input type=\"hidden\" name=\"redirect_uri\" value=\"{redirect_uri}\">\n
+    \               <input type=\"hidden\" name=\"scope\" value=\"{scope}\">\n                <input
+    type=\"hidden\" name=\"state\" value=\"{state}\">\n                <p>\n                    <label>Email:</label><br>\n
+    \                   <input type=\"email\" name=\"email\" required>\n                </p>\n
+    \               <p>\n                    <label>Password:</label><br>\n                    <input
+    type=\"password\" name=\"password\" required>\n                </p>\n                <p><button
+    type=\"submit\">登錄</button></p>\n            </form>\n        </body>\n        </html>\n
+    \       '''\n    \n    # 已登錄，生成授權碼\n    auth_code = secrets.token_urlsafe(32)\n
+    \   auth_codes_storage[auth_code] = {\n        'client_id': client_id,\n        'redirect_uri':
+    redirect_uri,\n        'scope': scope,\n        'user_email': session['user_email'],\n
+    \       'expires_at': datetime.now() + timedelta(minutes=10)\n    }\n    \n    redirect_url
+    = f\"{redirect_uri}?code={auth_code}&state={state}\"\n    return redirect(redirect_url)\n\n@app.route('/login',
+    methods=['POST'])\ndef login():\n    \"\"\"處理登錄請求\"\"\"\n    email = request.form.get('email')\n
+    \   password = request.form.get('password')\n    client_id = request.form.get('client_id')\n
+    \   redirect_uri = request.form.get('redirect_uri')\n    scope = request.form.get('scope')\n
+    \   state = request.form.get('state')\n    \n    if not email or not password:\n
+    \       return jsonify({\"error\": \"invalid_request\"}), 400\n    \n    # 從 MySQL
+    獲取用戶\n    user = get_user_from_mysql(email)\n    if not user:\n        return
+    \"Invalid email or password\", 401\n    \n    # 驗證 bcrypt 密碼\n    if not verify_bcrypt_password(password,
+    user['password_hash']):\n        return \"Invalid email or password\", 401\n    \n
+    \   # 登錄成功，保存到 session\n    session['user_email'] = user['email']\n    session['user_name']
+    = user['name']\n    session['user_role'] = user['role']\n    \n    # 生成授權碼\n    auth_code
+    = secrets.token_urlsafe(32)\n    auth_codes_storage[auth_code] = {\n        'client_id':
+    client_id,\n        'redirect_uri': redirect_uri,\n        'scope': scope,\n        'user_email':
+    user['email'],\n        'expires_at': datetime.now() + timedelta(minutes=10)\n
+    \   }\n    \n    redirect_url = f\"{redirect_uri}?code={auth_code}&state={state}\"\n
+    \   return redirect(redirect_url)\n\n@app.route('/token', methods=['POST'])\ndef
+    token():\n    \"\"\"OIDC Token 端點\"\"\"\n    grant_type = request.form.get('grant_type')\n
+    \   code = request.form.get('code')\n    client_id = request.form.get('client_id')\n
+    \   client_secret = request.form.get('client_secret')\n    redirect_uri = request.form.get('redirect_uri')\n
+    \   \n    if grant_type != 'authorization_code':\n        return jsonify({\"error\":
+    \"unsupported_grant_type\"}), 400\n    \n    # 驗證授權碼（從服務器端存儲讀取）\n    if code not
+    in auth_codes_storage:\n        logger.warning(f\"授權碼不存在: {code}\")\n        return
+    jsonify({\"error\": \"invalid_grant\"}), 400\n    \n    auth_info = auth_codes_storage[code]\n
+    \   \n    # 檢查過期\n    if datetime.now() > auth_info['expires_at']:\n        del
+    auth_codes_storage[code]\n        logger.warning(f\"授權碼已過期: {code}\")\n        return
+    jsonify({\"error\": \"invalid_grant\"}), 400\n    \n    # 驗證 client_id 和 redirect_uri\n
+    \   if auth_info['client_id'] != client_id or auth_info['redirect_uri'] != redirect_uri:\n
+    \       return jsonify({\"error\": \"invalid_client\"}), 400\n    \n    # 生成 access
+    token 和 id token\n    user_email = auth_info['user_email']\n    user = get_user_from_mysql(user_email)\n
+    \   \n    # 從 LDAP 獲取用戶信息（補充組信息等）\n    ldap_info = get_user_info_from_ldap(user_email)\n
+    \   if ldap_info:\n        # 合併 LDAP 信息\n        user['name'] = ldap_info.get('name',
+    user['name'])\n        user['ldap_role'] = ldap_info.get('role')\n    \n    now
+    = datetime.utcnow()\n    \n    # 使用 RS256 算法簽名 JWT\n    private_key_pem = _private_key.private_bytes(\n
+    \       encoding=serialization.Encoding.PEM,\n        format=serialization.PrivateFormat.PKCS8,\n
+    \       encryption_algorithm=serialization.NoEncryption()\n    )\n    \n    access_token
+    = jwt.encode({\n        'sub': user_email,\n        'email': user_email,\n        'name':
+    user['name'],\n        'iat': now,\n        'exp': now + timedelta(hours=1)\n
+    \   }, private_key_pem, algorithm='RS256')\n    \n    id_token = jwt.encode({\n
+    \       'iss': OIDC_ISSUER,\n        'sub': user_email,\n        'aud': client_id,\n
+    \       'email': user_email,\n        'name': user['name'],\n        'iat': now,\n
+    \       'exp': now + timedelta(hours=1)\n    }, private_key_pem, algorithm='RS256')\n
+    \   \n    # 刪除已使用的授權碼\n    del auth_codes_storage[code]\n    \n    return jsonify({\n
+    \       \"access_token\": access_token,\n        \"token_type\": \"Bearer\",\n
+    \       \"expires_in\": 3600,\n        \"id_token\": id_token\n    })\n\n@app.route('/userinfo',
+    methods=['GET'])\ndef userinfo():\n    \"\"\"OIDC UserInfo 端點\"\"\"\n    auth_header
+    = request.headers.get('Authorization')\n    if not auth_header or not auth_header.startswith('Bearer
+    '):\n        return jsonify({\"error\": \"invalid_token\"}), 401\n    \n    token
+    = auth_header.split(' ')[1]\n    try:\n        # 使用公鑰驗證 RS256 JWT\n        public_key_pem
+    = _public_key.public_bytes(\n            encoding=serialization.Encoding.PEM,\n
+    \           format=serialization.PublicFormat.SubjectPublicKeyInfo\n        )\n
+    \       payload = jwt.decode(token, public_key_pem, algorithms=['RS256'])\n        user_email
+    = payload.get('email')\n        user = get_user_from_mysql(user_email)\n        \n
+    \       if not user:\n            return jsonify({\"error\": \"user_not_found\"}),
+    404\n        \n        # 從 LDAP 獲取補充信息\n        ldap_info = get_user_info_from_ldap(user_email)\n
+    \       response = {\n            \"sub\": user_email,\n            \"email\":
+    user_email,\n            \"name\": user['name'],\n            \"preferred_username\":
+    user_email\n        }\n        \n        # 如果有 LDAP 信息，添加組信息\n        if ldap_info
+    and ldap_info.get('role'):\n            response['groups'] = [ldap_info['role']]\n
+    \       \n        return jsonify(response)\n    except jwt.InvalidTokenError:\n
+    \       return jsonify({\"error\": \"invalid_token\"}), 401\n\n@app.route('/.well-known/jwks.json',
+    methods=['GET'])\ndef jwks():\n    \"\"\"JWKS 端點 - 提供公鑰用於驗證 JWT\"\"\"\n    # 從公鑰生成
+    JWK\n    public_key_pem = _public_key.public_bytes(\n        encoding=serialization.Encoding.PEM,\n
+    \       format=serialization.PublicFormat.SubjectPublicKeyInfo\n    )\n    \n
+    \   # 提取 RSA 公鑰的模數和指數\n    public_numbers = _public_key.public_numbers()\n    \n
+    \   # 將整數轉換為 base64url 編碼的字符串\n    def int_to_base64url(n):\n        # 將整數轉換為字節\n
+    \       byte_length = (n.bit_length() + 7) // 8\n        n_bytes = n.to_bytes(byte_length,
+    byteorder='big')\n        # Base64URL 編碼\n        return base64.urlsafe_b64encode(n_bytes).decode('utf-8').rstrip('=')\n
+    \   \n    jwk = {\n        \"kty\": \"RSA\",\n        \"use\": \"sig\",\n        \"alg\":
+    \"RS256\",\n        \"kid\": \"auth-proxy-key-1\",\n        \"n\": int_to_base64url(public_numbers.n),\n
+    \       \"e\": int_to_base64url(public_numbers.e)\n    }\n    \n    return jsonify({\n
+    \       \"keys\": [jwk]\n    })\n\n@app.route('/health', methods=['GET'])\ndef
+    health():\n    \"\"\"健康檢查\"\"\"\n    return jsonify({\"status\": \"healthy\"})\n\nif
+    __name__ == '__main__':\n    port = int(os.getenv(\"PORT\", \"8080\"))\n    app.run(host='0.0.0.0',
+    port=port, debug=False)\n\n"
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2026-01-09T07:54:08Z"
+  name: auth-proxy-app-code
+  namespace: auth
+  resourceVersion: "138269865"
+  uid: e3c187ce-1756-4f2b-afc5-c5d0cbaf9b0c

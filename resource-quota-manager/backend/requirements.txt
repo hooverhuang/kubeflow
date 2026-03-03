@@ -1,0 +1,6 @@
+# resource-quota-manager/backend/requirements.txt
+flask==2.3.3
+flask-cors==4.0.0
+kubernetes==28.1.0
+pymysql==1.1.0
+bcrypt==4.1.2

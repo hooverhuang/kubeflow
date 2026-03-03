@@ -1,0 +1,84 @@
+apiVersion: v1
+data:
+  sync.py: "#!/usr/bin/env python3\n\"\"\"\nMySQL 到 OpenLDAP 同步腳本\n定期從 MySQL users\
+    \ table 同步用戶到 OpenLDAP\n\"\"\"\n\nimport pymysql\nfrom ldap3 import Server, Connection,\
+    \ ALL, MODIFY_REPLACE, SUBTREE\nimport time\nimport logging\nimport os\n\n# 配置日誌\n\
+    logging.basicConfig(\n    level=logging.INFO,\n    format='%(asctime)s - %(levelname)s\
+    \ - %(message)s'\n)\nlogger = logging.getLogger(__name__)\n\n# MySQL 配置\nMYSQL_HOST\
+    \ = os.getenv(\"MYSQL_HOST\", \"10.2.240.11\")\nMYSQL_PORT = int(os.getenv(\"\
+    MYSQL_PORT\", \"3306\"))\nMYSQL_DB = os.getenv(\"MYSQL_DB\", \"auth\")\nMYSQL_USER\
+    \ = os.getenv(\"MYSQL_USER\", \"usagereportdb\")\nMYSQL_PASSWORD = os.getenv(\"\
+    MYSQL_PASSWORD\", \"1@2Ma89t}yMz75kj\")\n\n# OpenLDAP 配置\nLDAP_SERVER = os.getenv(\"\
+    LDAP_SERVER\", \"openldap.auth.svc.cluster.local\")\nLDAP_PORT = int(os.getenv(\"\
+    LDAP_PORT\", \"389\"))\nLDAP_BASE_DN = os.getenv(\"LDAP_BASE_DN\", \"dc=ubilink,dc=ai\"\
+    )\nLDAP_ADMIN_DN = os.getenv(\"LDAP_ADMIN_DN\", f\"cn=admin,{LDAP_BASE_DN}\")\n\
+    LDAP_ADMIN_PASSWORD = os.getenv(\"LDAP_ADMIN_PASSWORD\", \"admin123\")\nLDAP_USERS_OU\
+    \ = f\"ou=users,{LDAP_BASE_DN}\"\n\ndef get_users_from_mysql():\n    \"\"\"從 MySQL\
+    \ 讀取用戶\"\"\"\n    try:\n        conn = pymysql.connect(\n            host=MYSQL_HOST,\n\
+    \            port=MYSQL_PORT,\n            user=MYSQL_USER,\n            password=MYSQL_PASSWORD,\n\
+    \            database=MYSQL_DB,\n            charset='utf8mb4'\n        )\n  \
+    \      \n        cursor = conn.cursor()\n        cursor.execute(\"SELECT id, email,\
+    \ name, role FROM users\")\n        users = []\n        \n        for row in cursor.fetchall():\n\
+    \            users.append({\n                \"id\": str(row[0]),\n          \
+    \      \"email\": row[1] if row[1] else \"\",\n                \"name\": row[2]\
+    \ if row[2] else \"\",\n                \"role\": row[3] if len(row) > 3 and row[3]\
+    \ else None\n            })\n        \n        cursor.close()\n        conn.close()\n\
+    \        logger.info(f\"從 MySQL 讀取到 {len(users)} 個用戶\")\n        return users\n\
+    \    except Exception as e:\n        logger.error(f\"無法從 MySQL 讀取用戶: {e}\")\n\
+    \        raise\n\ndef ensure_ou_exists(conn, ou_dn):\n    \"\"\"確保 OU 存在\"\"\"\
+    \n    try:\n        if not conn.search(ou_dn, '(objectClass=*)'):\n          \
+    \  conn.add(ou_dn, ['organizationalUnit'])\n            logger.info(f\"創建 OU:\
+    \ {ou_dn}\")\n    except Exception as e:\n        logger.debug(f\"OU 可能已存在: {e}\"\
+    )\n\ndef sync_to_openldap(users):\n    \"\"\"同步用戶到 OpenLDAP\"\"\"\n    server\
+    \ = Server(LDAP_SERVER, port=LDAP_PORT, get_info=ALL)\n    \n    try:\n      \
+    \  with Connection(server, LDAP_ADMIN_DN, LDAP_ADMIN_PASSWORD, auto_bind=True)\
+    \ as conn:\n            # 確保 base DN 存在\n            try:\n                if\
+    \ not conn.search(LDAP_BASE_DN, '(objectClass=*)'):\n                    conn.add(LDAP_BASE_DN,\
+    \ ['dcObject', 'organization'])\n            except:\n                pass\n \
+    \           \n            # 確保 users OU 存在\n            ensure_ou_exists(conn,\
+    \ LDAP_USERS_OU)\n            \n            success_count = 0\n            error_count\
+    \ = 0\n            \n            for user in users:\n                if not user['email']:\n\
+    \                    logger.warning(f\"跳過沒有 email 的用戶: {user}\")\n           \
+    \         continue\n                \n                # 創建用戶 DN\n            \
+    \    user_dn = f\"uid={user['email']},{LDAP_USERS_OU}\"\n                \n  \
+    \              # 準備屬性\n                attributes = {\n                    'objectClass':\
+    \ ['inetOrgPerson', 'organizationalPerson', 'person'],\n                    'uid':\
+    \ user['email'],\n                    'cn': user['name'] or user['email'],\n \
+    \                   'sn': user['name'] or user['email'].split('@')[0],\n     \
+    \               'mail': user['email']\n                }\n                \n \
+    \               if user['role']:\n                    attributes['description']\
+    \ = str(user['role'])\n                \n                # 檢查用戶是否存在\n        \
+    \        if conn.search(user_dn, '(objectClass=*)'):\n                    # 更新現有用戶\n\
+    \                    try:\n                        conn.modify(user_dn, {\n  \
+    \                          'cn': [(MODIFY_REPLACE, [attributes['cn']])],\n   \
+    \                         'sn': [(MODIFY_REPLACE, [attributes['sn']])],\n    \
+    \                        'mail': [(MODIFY_REPLACE, [attributes['mail']])]\n  \
+    \                      })\n                        if user['role']:\n        \
+    \                    conn.modify(user_dn, {\n                                'description':\
+    \ [(MODIFY_REPLACE, [str(user['role'])])]\n                            })\n  \
+    \                      logger.info(f\"✅ 更新用戶: {user['email']}\")\n           \
+    \             success_count += 1\n                    except Exception as e:\n\
+    \                        logger.error(f\"❌ 更新用戶失敗 {user['email']}: {e}\")\n  \
+    \                      error_count += 1\n                else:\n             \
+    \       # 創建新用戶\n                    try:\n                        conn.add(user_dn,\
+    \ attributes=attributes)\n                        logger.info(f\"✅ 創建用戶: {user['email']}\"\
+    )\n                        success_count += 1\n                    except Exception\
+    \ as e:\n                        logger.error(f\"❌ 創建用戶失敗 {user['email']}: {e}\"\
+    )\n                        error_count += 1\n            \n            logger.info(f\"\
+    同步完成: 成功 {success_count}, 失敗 {error_count}\")\n            return success_count,\
+    \ error_count\n            \n    except Exception as e:\n        logger.error(f\"\
+    無法連接到 OpenLDAP: {e}\")\n        raise\n\ndef main():\n    logger.info(\"=== MySQL\
+    \ 到 OpenLDAP 同步服務啟動 ===\")\n    logger.info(f\"MySQL: {MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}\"\
+    )\n    logger.info(f\"OpenLDAP: {LDAP_SERVER}:{LDAP_PORT}\")\n    \n    sync_interval\
+    \ = int(os.getenv(\"SYNC_INTERVAL\", \"300\"))  # 預設 5 分鐘\n    \n    while True:\n\
+    \        try:\n            users = get_users_from_mysql()\n            if users:\n\
+    \                sync_to_openldap(users)\n            else:\n                logger.warning(\"\
+    沒有找到用戶\")\n            \n            logger.info(f\"等待 {sync_interval} 秒後再次同步...\"\
+    )\n            time.sleep(sync_interval)\n            \n        except Exception\
+    \ as e:\n            logger.error(f\"同步錯誤: {e}\")\n            logger.info(\"\
+    等待 60 秒後重試...\")\n            time.sleep(60)\n\nif __name__ == \"__main__\":\n\
+    \    main()\n\n"
+kind: ConfigMap
+metadata:
+  name: mysql-ldap-sync-script
+  namespace: auth

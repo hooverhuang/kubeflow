@@ -1,0 +1,65 @@
+# 镜像配置
+image:
+  repository: resource-quota-manager
+  tag: latest
+  pullPolicy: Never  # IfNotPresent, Always, Never
+
+# 部署配置
+replicaCount: 1
+
+# 服务配置
+service:
+  type: NodePort  # ClusterIP, NodePort, LoadBalancer
+  port: 80
+  targetPort: 5000
+  nodePort: null  # 如果指定，使用该端口；null 则自动分配
+
+# 资源限制
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# 健康检查
+livenessProbe:
+  httpGet:
+    path: /
+    port: 5000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: 5000
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 3
+
+# 环境变量
+env:
+  PORT: "5000"
+
+# RBAC 配置
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Namespace
+namespace:
+  create: true
+  name: resource-quota-manager
+
+# 镜像拉取密钥（如果需要）
+imagePullSecrets: []

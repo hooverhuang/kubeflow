@@ -1,0 +1,29 @@
+# Patch for istio-ingressgateway-require-jwt AuthorizationPolicy
+# Add api.ubilink.ai to notHosts and /serving/* to notPaths
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: istio-ingressgateway-require-jwt
+  namespace: istio-system
+spec:
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notRequestPrincipals:
+        - '*'
+    to:
+    - operation:
+        notHosts:
+        - '*.yeisimon657.example.com'
+        - '*.hoover2274.example.com'
+        - api.ubilink.ai
+        - '*.api.ubilink.ai'
+        notPaths:
+        - /dex/*
+        - /dex/**
+        - /oauth2/*
+        - /serving/*
+  selector:
+    matchLabels:
+      app: istio-ingressgateway

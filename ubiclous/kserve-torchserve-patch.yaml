@@ -1,0 +1,54 @@
+# 套用方式（需有 cluster 權限）:
+#   kubectl apply -f kserve-torchserve-patch.yaml
+#
+# 效果：TorchServe 的 config 改由各 namespace 的 ConfigMap torchserve-ts-config 提供（含 grpc_inference_port），
+# 不再依賴 GCS model 包裡的 config。建立 PyTorch InferenceService 時 BFF 會自動在該 namespace 建立此 ConfigMap。
+apiVersion: serving.kserve.io/v1alpha1
+kind: ClusterServingRuntime
+metadata:
+  name: kserve-torchserve
+spec:
+  annotations:
+    prometheus.kserve.io/path: /metrics
+    prometheus.kserve.io/port: "8082"
+  containers:
+    - name: kserve-container
+      image: pytorch/torchserve-kfs:0.9.0
+      args:
+        - torchserve
+        - --start
+        - --model-store=/mnt/models/model-store
+        - --ts-config=/mnt/models/config/config.properties
+      env:
+        - name: TS_SERVICE_ENVELOPE
+          value: "{{.Labels.serviceEnvelope}}"
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        privileged: false
+        runAsNonRoot: true
+        runAsUser: 1000
+      volumeMounts:
+        - name: ts-config
+          mountPath: /mnt/models/config
+  volumes:
+    - name: ts-config
+      configMap:
+        name: torchserve-ts-config
+  protocolVersions:
+    - v1
+    - v2
+    - grpc-v2
+  supportedModelFormats:
+    - name: pytorch
+      version: "1"
+      priority: 2
+      autoSelect: true

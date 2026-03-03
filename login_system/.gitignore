@@ -1,0 +1,12 @@
+# Keycloak 相關文件
+*keycloak*
+KEYCLOAK_*
+
+# 臨時文件
+*.pyc
+__pycache__/
+*.log
+*.tmp
+
+# Docker volumes
+openldap-data/

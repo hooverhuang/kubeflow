@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  openldap:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/bitnami/openldap:2.6-debian-12
+    container_name: openldap
+    ports:
+      - "389:1389"
+      - "636:1636"
+    environment:
+      - LDAP_ADMIN_USERNAME=admin
+      - LDAP_ADMIN_PASSWORD=admin123
+      - LDAP_ROOT=dc=ubilink,dc=ai
+      - LDAP_USERS=
+      - LDAP_PASSWORDS=
+    volumes:
+      - openldap-data:/bitnami/openldap/data
+    restart: unless-stopped
+    networks:
+      - openldap-network
+
+volumes:
+  openldap-data:
+    driver: local
+
+networks:
+  openldap-network:
+    driver: bridge
+

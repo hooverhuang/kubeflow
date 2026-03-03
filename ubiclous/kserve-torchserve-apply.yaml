@@ -1,0 +1,100 @@
+# 套用方式:
+#   kubectl apply -f kserve-torchserve-apply.yaml
+#
+# 說明:
+# - ConfigMap 為 namespace 級別，下面範例為 hoover2274；其他要用 PyTorch 的 namespace 請複製 ConfigMap 區塊並改 metadata.namespace 後再 apply，或由 UI 建立 PyTorch InferenceService 時 BFF 自動建立。
+# - ClusterServingRuntime 套用一次即可，會讓所有 namespace 的 TorchServe Pod 掛載該 namespace 內的 torchserve-ts-config。
+# - InferenceService 為範例（pytorchtest），可依需求修改 name、namespace、storageUri、resources 或刪除改由 UI 建立。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: torchserve-ts-config
+  namespace: hoover2274
+data:
+  config.properties: |
+    inference_address=http://0.0.0.0:8085
+    management_address=http://0.0.0.0:8085
+    metrics_address=http://0.0.0.0:8082
+    grpc_inference_port=7070
+    grpc_management_port=7071
+    enable_metrics_api=true
+    metrics_format=prometheus
+    number_of_netty_threads=4
+    job_queue_size=10
+    enable_envvars_config=true
+    install_py_dep_per_model=true
+    model_store=/mnt/models/model-store
+    model_snapshot={"name":"startup.cfg","modelCount":1,"models":{"mnist":{"1.0":{"defaultVersion":true,"marName":"mnist.mar","minWorkers":1,"maxWorkers":5,"batchSize":1,"maxBatchDelay":10,"responseTimeout":120}}}}
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: ClusterServingRuntime
+metadata:
+  name: kserve-torchserve
+spec:
+  annotations:
+    prometheus.kserve.io/path: /metrics
+    prometheus.kserve.io/port: "8082"
+  containers:
+    - name: kserve-container
+      image: pytorch/torchserve-kfs:0.9.0
+      args:
+        - torchserve
+        - --start
+        - --model-store=/mnt/models/model-store
+        - --ts-config=/mnt/models/config/config.properties
+      env:
+        - name: TS_SERVICE_ENVELOPE
+          value: "{{.Labels.serviceEnvelope}}"
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        privileged: false
+        runAsNonRoot: true
+        runAsUser: 1000
+      volumeMounts:
+        - name: ts-config
+          mountPath: /mnt/models/config
+  volumes:
+    - name: ts-config
+      configMap:
+        name: torchserve-ts-config
+  protocolVersions:
+    - v1
+    - v2
+    - grpc-v2
+  supportedModelFormats:
+    - name: pytorch
+      version: "1"
+      priority: 2
+      autoSelect: true
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: pytorchtest
+  namespace: hoover2274
+spec:
+  predictor:
+    nodeSelector:
+      node-role.kubernetes.io/gpu: ""
+    pytorch:
+      storageUri: gs://kfserving-examples/models/torchserve/image_classifier
+      resources:
+        requests:
+          cpu: "2"
+          memory: "2Gi"
+          nvidia.com/gpu: "2"
+        limits:
+          cpu: "2"
+          memory: "2Gi"
+          nvidia.com/gpu: "2"
+    minReplicas: 1

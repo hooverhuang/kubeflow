@@ -1,0 +1,25 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-all-api-ubilink-inferenceservices
+  namespace: istio-system
+spec:
+  selector:
+    matchLabels:
+      app: istio-ingressgateway
+  action: ALLOW
+  rules:
+  - to:
+    - operation:
+        hosts:
+        - api.ubilink.ai
+        - '*.api.ubilink.ai'
+        - api.ubilink.ai:*
+        - '*.api.ubilink.ai:*'
+        methods:
+        - GET
+        - POST
+        - OPTIONS
+        - PUT
+        - DELETE
+        - HEAD

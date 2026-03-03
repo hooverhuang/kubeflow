@@ -1,0 +1,37 @@
+apiVersion: v1
+data:
+  config.yaml: "issuer: https://kubeflow.ubilink.ai/dex\nstorage:\n  type: kubernetes\n
+    \ config:\n    inCluster: true\nweb:\n  http: 0.0.0.0:5556\nlogger:\n  level:
+    \"debug\"\n  format: text\noauth2:\n  skipApprovalScreen: true\n\nconnectors:\n#
+    Authentik connector（原有，保留）\n- type: oidc\n  id: authentik\n  name: Authentik\n
+    \ config:\n    issuer: https://authentik.ubilink.ai/application/o/kubeflow-dex/\n
+    \   clientID: hxl26gPgWU1qQQmKzFWVroYZePKcbw4auph3w05Z\n    clientSecret: 9gRbUNVcX95HFSFsfuxqzCMI07pSzCKVQDci4LOThVdTElwdd1WC6asaC9BcWkiUZFaLr7afU9M2MM1ADdmfboE8NoBTV60SIswCXx4IhNGZiF04jufU57nw8EBvgUyM\n
+    \   redirectURI: https://kubeflow.ubilink.ai/dex/callback\n    insecureSkipEmailVerified:
+    true\n    insecureEnableGroups: true\n    insecureSkipVerify: true\n    scopes:\n
+    \   - openid\n    - profile\n    - email\n    - groups\n\n# OpenLDAP connector（新增）\n-
+    type: ldap\n  id: openldap\n  name: OpenLDAP\n  config:\n    # OpenLDAP 服務地址\n
+    \   # 使用 Kubernetes Service 名稱（推薦，通過 Service 訪問）\n    host: openldap.auth.svc.cluster.local:389\n
+    \   # 備用：直接使用 Kubernetes 內部 IP（已測試可連接）\n    # host: 10.2.2.108:389\n    \n    #
+    警告：使用 389 端口（非 TLS）會以明文傳輸密碼\n    # 建議未來升級到 636 (LDAPS) 或使用 startTLS\n    insecureNoSSL:
+    true\n    \n    # 應用服務帳號（用於搜索用戶和組）\n    bindDN: cn=admin,dc=ubilink,dc=ai\n    bindPW:
+    admin123\n    \n    # 用戶名提示\n    usernamePrompt: Email Address\n    \n    # 用戶搜索配置\n
+    \   userSearch:\n      # 用戶搜索的基礎 DN\n      baseDN: ou=users,dc=ubilink,dc=ai\n
+    \     # 過濾器：搜索 inetOrgPerson 類型的對象\n      filter: \"(objectClass=inetOrgPerson)\"\n
+    \     # 用戶名屬性（用戶登錄時輸入的字段）\n      username: uid\n      # 用戶 ID 屬性（唯一標識符）\n      idAttr:
+    uid\n      # 郵箱屬性（必需）\n      emailAttr: mail\n      # 顯示名稱屬性\n      nameAttr:
+    cn\n      # 首選用戶名屬性\n      preferredUsernameAttr: uid\n    \n    # 組搜索配置（可選，如果
+    LDAP 中有組信息）\n    # groupSearch:\n    #   baseDN: ou=groups,dc=ubilink,dc=ai\n
+    \   #   filter: \"(objectClass=groupOfNames)\"\n    #   userMatchers:\n    #   -
+    userAttr: DN\n    #     groupAttr: member\n    #   nameAttr: cn\n\nstaticClients:\n-
+    idEnv: OIDC_CLIENT_ID\n  redirectURIs: [\"/oauth2/callback\"]\n  name: \"Dex Login
+    Application\"\n  secretEnv: OIDC_CLIENT_SECRET\n  public: false\n"
+kind: ConfigMap
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","data":{"config.yaml":"issuer: https://kubeflow.ubilink.ai/dex\nstorage:\n  type: kubernetes\n  config:\n    inCluster: true\nweb:\n  http: 0.0.0.0:5556\nlogger:\n  level: \"debug\"\n  format: text\noauth2:\n  skipApprovalScreen: true\n\nconnectors:\n# Authentik connector（原有，保留）\n- type: oidc\n  id: authentik\n  name: Authentik\n  config:\n    issuer: https://authentik.ubilink.ai/application/o/kubeflow-dex/\n    clientID: hxl26gPgWU1qQQmKzFWVroYZePKcbw4auph3w05Z\n    clientSecret: 9gRbUNVcX95HFSFsfuxqzCMI07pSzCKVQDci4LOThVdTElwdd1WC6asaC9BcWkiUZFaLr7afU9M2MM1ADdmfboE8NoBTV60SIswCXx4IhNGZiF04jufU57nw8EBvgUyM\n    redirectURI: https://kubeflow.ubilink.ai/dex/callback\n    insecureSkipEmailVerified: true\n    insecureEnableGroups: true\n    insecureSkipVerify: true\n    scopes:\n    - openid\n    - profile\n    - email\n    - groups\n\n# OpenLDAP connector（新增）\n- type: ldap\n  id: openldap\n  name: OpenLDAP\n  config:\n    # OpenLDAP 服務地址\n    # 使用 Kubernetes Service 名稱（推薦，通過 Service 訪問）\n    host: openldap.auth.svc.cluster.local:389\n    # 備用：直接使用 Kubernetes 內部 IP（已測試可連接）\n    # host: 10.2.2.108:389\n    \n    # 警告：使用 389 端口（非 TLS）會以明文傳輸密碼\n    # 建議未來升級到 636 (LDAPS) 或使用 startTLS\n    insecureNoSSL: true\n    \n    # 應用服務帳號（用於搜索用戶和組）\n    bindDN: cn=admin,dc=ubilink,dc=ai\n    bindPW: admin123\n    \n    # 用戶名提示\n    usernamePrompt: Email Address\n    \n    # 用戶搜索配置\n    userSearch:\n      # 用戶搜索的基礎 DN\n      baseDN: ou=users,dc=ubilink,dc=ai\n      # 過濾器：搜索 inetOrgPerson 類型的對象\n      filter: \"(objectClass=inetOrgPerson)\"\n      # 用戶名屬性（用戶登錄時輸入的字段）\n      username: uid\n      # 用戶 ID 屬性（唯一標識符）\n      idAttr: uid\n      # 郵箱屬性（必需）\n      emailAttr: mail\n      # 顯示名稱屬性\n      nameAttr: cn\n      # 首選用戶名屬性\n      preferredUsernameAttr: uid\n    \n    # 組搜索配置（可選，如果 LDAP 中有組信息）\n    # groupSearch:\n    #   baseDN: ou=groups,dc=ubilink,dc=ai\n    #   filter: \"(objectClass=groupOfNames)\"\n    #   userMatchers:\n    #   - userAttr: DN\n    #     groupAttr: member\n    #   nameAttr: cn\n\nstaticClients:\n- idEnv: OIDC_CLIENT_ID\n  redirectURIs: [\"/oauth2/callback\"]\n  name: \"Dex Login Application\"\n  secretEnv: OIDC_CLIENT_SECRET\n  public: false\n"},"kind":"ConfigMap","metadata":{"annotations":{},"name":"dex","namespace":"auth"}}
+  creationTimestamp: "2025-10-02T08:53:47Z"
+  name: dex
+  namespace: auth
+  resourceVersion: "138021728"
+  uid: 1354d6c7-6900-4fcf-9781-822468c6ce3b
